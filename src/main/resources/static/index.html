@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WebSocket Chat Demo</title>
+    <title>双人自助聊天室</title>
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.5.0/dist/sockjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
     <style>
@@ -9,119 +9,212 @@
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 20px;
+            background-color: #f5f5f5;
         }
-        #chat-container {
-            max-width: 600px;
+        .container {
+            display: flex;
+            max-width: 1200px;
             margin: 0 auto;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            padding: 20px;
+            gap: 20px;
         }
-        #message-area {
-            height: 300px;
-            border: 1px solid #eee;
-            margin-bottom: 10px;
-            padding: 10px;
+        .chat-window {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-header {
+            background: #4a76a8;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .message-area {
+            flex: 1;
+            padding: 15px;
             overflow-y: auto;
+            height: 400px;
         }
-        #message-input {
-            width: 70%;
-            padding: 8px;
+        .message-input-area {
+            display: flex;
+            padding: 15px;
+            border-top: 1px solid #eee;
         }
-        #send-button {
-            padding: 8px 15px;
+        .message-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .send-button {
+            padding: 10px 15px;
+            margin-left: 10px;
+            background: #4a76a8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .send-button:hover {
+            background: #3a6698;
         }
         .message {
-            margin-bottom: 10px;
-            padding: 5px 10px;
+            margin-bottom: 15px;
+            padding: 10px;
             border-radius: 5px;
-            background-color: #f0f0f0;
+            max-width: 80%;
         }
-        .user-join {
-            color: #4CAF50;
-            font-style: italic;
+        .self-message {
+            background: #e3f2fd;
+            margin-left: auto;
+        }
+        .other-message {
+            background: #f1f1f1;
+            margin-right: auto;
+        }
+        .message-sender {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .system-message {
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            margin: 10px 0;
         }
     </style>
 </head>
 <body>
-<div id="chat-container">
-    <h2>WebSocket Chat Demo</h2>
-    <div id="message-area"></div>
-    <div>
-        <input type="text" id="message-input" placeholder="Type a message...">
-        <button id="send-button">Send</button>
+<div class="container">
+    <!-- 用户1的聊天窗口 -->
+    <div class="chat-window" id="user1-window">
+        <div class="chat-header">用户1 (张三)</div>
+        <div class="message-area" id="user1-messages"></div>
+        <div class="message-input-area">
+            <input type="text" class="message-input" id="user1-input" placeholder="输入消息...">
+            <button class="send-button" id="user1-send">发送</button>
+        </div>
+    </div>
+
+    <!-- 用户2的聊天窗口 -->
+    <div class="chat-window" id="user2-window">
+        <div class="chat-header">用户2 (李四)</div>
+        <div class="message-area" id="user2-messages"></div>
+        <div class="message-input-area">
+            <input type="text" class="message-input" id="user2-input" placeholder="输入消息...">
+            <button class="send-button" id="user2-send">发送</button>
+        </div>
     </div>
 </div>
 
 <script>
-    const messageArea = document.getElementById('message-area');
-    const messageInput = document.getElementById('message-input');
-    const sendButton = document.getElementById('send-button');
+    // 定义两个用户
+    const user1 = {
+        name: '张三',
+        input: document.getElementById('user1-input'),
+        sendButton: document.getElementById('user1-send'),
+        messageArea: document.getElementById('user1-messages'),
+        stompClient: null
+    };
 
-    let stompClient = null;
-    let username = null;
+    const user2 = {
+        name: '李四',
+        input: document.getElementById('user2-input'),
+        sendButton: document.getElementById('user2-send'),
+        messageArea: document.getElementById('user2-messages'),
+        stompClient: null
+    };
 
-    function connect() {
-        username = prompt('Enter your name:') || 'Anonymous';
-
+    // 连接WebSocket
+    function connectUser(user) {
         const socket = new SockJS('/ws');
-        stompClient = Stomp.over(socket);
+        user.stompClient = Stomp.over(socket);
 
-        stompClient.connect({}, function(frame) {
-            console.log('Connected: ' + frame);
+        user.stompClient.connect({}, function(frame) {
+            console.log(`${user.name} connected: ` + frame);
 
-            // 通知服务器用户加入
-            stompClient.send("/app/chat.addUser", {},
-                JSON.stringify({sender: username, type: 'JOIN'})
+            // 发送用户加入通知
+            user.stompClient.send("/app/chat.addUser", {},
+                JSON.stringify({
+                    sender: user.name,
+                    type: 'JOIN'
+                })
             );
 
             // 订阅公共频道
-            stompClient.subscribe('/topic/public', function(message) {
-                showMessage(JSON.parse(message.body));
+            user.stompClient.subscribe('/topic/public', function(message) {
+                const chatMessage = JSON.parse(message.body);
+                displayMessage(user, chatMessage);
             });
         });
     }
 
-    function sendMessage() {
-        const messageContent = messageInput.value.trim();
-        if(messageContent && stompClient) {
+    // 显示消息
+    function displayMessage(receiverUser, message) {
+        const messageElement = document.createElement('div');
+
+        if (message.type === 'JOIN') {
+            messageElement.className = 'system-message';
+            messageElement.textContent = `${message.sender} 加入了聊天`;
+        } else {
+            messageElement.className = 'message ' +
+                (message.sender === receiverUser.name ? 'self-message' : 'other-message');
+
+            const senderElement = document.createElement('div');
+            senderElement.className = 'message-sender';
+            senderElement.textContent = message.sender;
+
+            const contentElement = document.createElement('div');
+            contentElement.textContent = message.content;
+
+            messageElement.appendChild(senderElement);
+            messageElement.appendChild(contentElement);
+        }
+
+        receiverUser.messageArea.appendChild(messageElement);
+        receiverUser.messageArea.scrollTop = receiverUser.messageArea.scrollHeight;
+    }
+
+    // 发送消息
+    function sendMessage(user) {
+        const messageContent = user.input.value.trim();
+        if (messageContent && user.stompClient) {
             const chatMessage = {
-                sender: username,
-                content: messageInput.value,
+                sender: user.name,
+                content: messageContent,
                 type: 'CHAT'
             };
 
-            stompClient.send("/app/chat.sendMessage", {},
+            user.stompClient.send("/app/chat.sendMessage", {},
                 JSON.stringify(chatMessage));
-            messageInput.value = '';
+            user.input.value = '';
         }
     }
 
-    function showMessage(message) {
-        const messageElement = document.createElement('div');
-        messageElement.classList.add('message');
+    // 初始化
+    function initialize() {
+        // 连接两个用户
+        connectUser(user1);
+        connectUser(user2);
 
-        if(message.type === 'JOIN') {
-            messageElement.classList.add('user-join');
-            messageElement.innerHTML = `<strong>${message.sender}</strong> joined!`;
-        } else {
-            messageElement.innerHTML = `<strong>${message.sender}:</strong> ${message.content}`;
-        }
+        // 设置事件监听
+        user1.sendButton.addEventListener('click', () => sendMessage(user1));
+        user1.input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage(user1);
+        });
 
-        messageArea.appendChild(messageElement);
-        messageArea.scrollTop = messageArea.scrollHeight;
+        user2.sendButton.addEventListener('click', () => sendMessage(user2));
+        user2.input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage(user2);
+        });
     }
 
-    // 事件监听
-    sendButton.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', function(e) {
-        if(e.key === 'Enter') {
-            sendMessage();
-        }
-    });
-
-    // 初始化连接
-    connect();
+    // 页面加载完成后初始化
+    window.onload = initialize;
 </script>
 </body>
 </html>
