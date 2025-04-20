@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Chat Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.5.0/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        #chat-container {
+            max-width: 600px;
+            margin: 0 auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+        }
+        #message-area {
+            height: 300px;
+            border: 1px solid #eee;
+            margin-bottom: 10px;
+            padding: 10px;
+            overflow-y: auto;
+        }
+        #message-input {
+            width: 70%;
+            padding: 8px;
+        }
+        #send-button {
+            padding: 8px 15px;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            background-color: #f0f0f0;
+        }
+        .user-join {
+            color: #4CAF50;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+<div id="chat-container">
+    <h2>WebSocket Chat Demo</h2>
+    <div id="message-area"></div>
+    <div>
+        <input type="text" id="message-input" placeholder="Type a message...">
+        <button id="send-button">Send</button>
+    </div>
+</div>
+
+<script>
+    const messageArea = document.getElementById('message-area');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+
+    let stompClient = null;
+    let username = null;
+
+    function connect() {
+        username = prompt('Enter your name:') || 'Anonymous';
+
+        const socket = new SockJS('/ws');
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect({}, function(frame) {
+            console.log('Connected: ' + frame);
+
+            // 通知服务器用户加入
+            stompClient.send("/app/chat.addUser", {},
+                JSON.stringify({sender: username, type: 'JOIN'})
+            );
+
+            // 订阅公共频道
+            stompClient.subscribe('/topic/public', function(message) {
+                showMessage(JSON.parse(message.body));
+            });
+        });
+    }
+
+    function sendMessage() {
+        const messageContent = messageInput.value.trim();
+        if(messageContent && stompClient) {
+            const chatMessage = {
+                sender: username,
+                content: messageInput.value,
+                type: 'CHAT'
+            };
+
+            stompClient.send("/app/chat.sendMessage", {},
+                JSON.stringify(chatMessage));
+            messageInput.value = '';
+        }
+    }
+
+    function showMessage(message) {
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message');
+
+        if(message.type === 'JOIN') {
+            messageElement.classList.add('user-join');
+            messageElement.innerHTML = `<strong>${message.sender}</strong> joined!`;
+        } else {
+            messageElement.innerHTML = `<strong>${message.sender}:</strong> ${message.content}`;
+        }
+
+        messageArea.appendChild(messageElement);
+        messageArea.scrollTop = messageArea.scrollHeight;
+    }
+
+    // 事件监听
+    sendButton.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', function(e) {
+        if(e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+
+    // 初始化连接
+    connect();
+</script>
+</body>
+</html>
